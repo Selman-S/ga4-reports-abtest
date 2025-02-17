@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GA4 AB Test Analyzer</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            width: 400px;
+            padding: 16px;
+            font-family: 'Segoe UI', Arial, sans-serif;
+        }
+        .header {
+            margin-bottom: 16px;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+        button:hover {
+            background-color: #3367d6;
+        }
+        .card {
+            background: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .card-title {
+            color: #1a73e8;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        .test-info {
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 8px;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .metric-card {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            padding: 12px;
+        }
+        .metric-title {
+            font-size: 12px;
+            color: #5f6368;
+            margin-bottom: 4px;
+        }
+        .metric-value {
+            font-size: 16px;
+            font-weight: 500;
+            color: #1a73e8;
+        }
+        .metric-change {
+            font-size: 12px;
+            margin-top: 4px;
+        }
+        .positive {
+            color: #34a853;
+        }
+        .negative {
+            color: #ea4335;
+        }
+        .confidence {
+            font-size: 12px;
+            color: #5f6368;
+            margin-top: 8px;
+            padding: 8px;
+            background: #f1f3f4;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <button id="runButton">Analiz Et</button>
+    <div id="result"></div>
+    <script src="popup.js"></script>
+</body>
+</html> 
