@@ -173,65 +173,399 @@ function getTableData() {
     };
 }
 
+// Tab ismini al
+function getTabName() {
+    try {
+        const activeTab = document.querySelector('.analysis-area-header .cdk-drag .step-tab-active');
+        if (!activeTab) {
+            throw new Error('Aktif tab bulunamadı');
+        }
+
+        const stepIndex = activeTab.closest(".cdk-drag").getAttribute('data-step-index');
+        const tabName = activeTab.querySelector('.mat-mdc-input-element').getAttribute("aria-label");
+
+        if (!stepIndex || !tabName) {
+            throw new Error('Tab bilgileri eksik');
+        }
+
+        return `${stepIndex}-${tabName}`;
+    } catch (error) {
+        console.error('Tab ismi alma hatası:', error);
+        throw error;
+    }
+}
+
+// KPI verilerini kaydet
+function saveKPIData(reportInfo, tableData, type) {
+    try {
+        const storedData = JSON.parse(sessionStorage.getItem('ga4_abtest_data') || '{}');
+        const currentKPI = tableData.kpis[0];
+        const segments = tableData.segments;
+
+        // Tab ismini al
+        const tabName = getTabName();
+
+        // Kontrol ve varyant gruplarını bul
+        const control = segments.find(segment => 
+            segment.segment.toLowerCase().includes('v0') || 
+            segment.segment.toLowerCase().includes('control')
+        );
+        const variant = segments.find(segment => 
+            !(segment.segment.toLowerCase().includes('v0') || 
+              segment.segment.toLowerCase().includes('control'))
+        );
+
+        if (!control || !variant) {
+            throw new Error('Kontrol veya varyant grubu bulunamadı');
+        }
+
+        // Yeni veriyi hazırla
+        const newData = {
+            reportName: reportInfo.reportName,
+            dateRange: reportInfo.dateRange,
+            segments: reportInfo.segments,
+            value: control.metrics[currentKPI],
+            segment: control.segment,
+            variantValue: variant.metrics[currentKPI],
+            variantSegment: variant.segment,
+            tabName: tabName
+        };
+
+        // Veri tipine göre kaydet
+        if (type === 'session') {
+            storedData.sessionData = newData;
+            // Sadece aynı tab'deki dönüşüm verisini temizle
+            if (storedData.conversionData && 
+                storedData.conversionData.tabName === tabName) {
+                delete storedData.conversionData;
+            }
+        } else if (type === 'conversion') {
+            storedData.conversionData = newData;
+            // Sadece aynı tab'deki session verisini temizle
+            if (storedData.sessionData && 
+                storedData.sessionData.tabName === tabName) {
+                delete storedData.sessionData;
+            }
+        }
+
+        sessionStorage.setItem('ga4_abtest_data', JSON.stringify(storedData));
+        showNotification(`${type === 'session' ? 'Session' : 'Dönüşüm'} verisi "${tabName}" tabında kaydedildi.`, 'success');
+
+        // Butonları güncelle
+        const buttonContainer = document.querySelector('.ga4-abtest-buttons');
+        if (buttonContainer) {
+            checkKPIDataAndUpdateButton(buttonContainer, tableData, reportInfo);
+        }
+    } catch (error) {
+        console.error('KPI kaydetme hatası:', error);
+        showNotification('Veri kaydedilirken bir hata oluştu: ' + error.message, 'error');
+    }
+}
+
 // KPI verilerini kontrol et ve buton metnini güncelle
 function checkKPIDataAndUpdateButton(buttonContainer, tableData, reportInfo) {
-    const storedData = JSON.parse(sessionStorage.getItem('ga4_abtest_data') || 'null');
-    const currentKPIs = tableData.kpis;
-
     // Tüm butonları temizle
     buttonContainer.innerHTML = '';
 
-    // Mevcut rapor bilgileri
-    const currentReportInfo = {
-        reportName: reportInfo.reportName,
-        dateRange: reportInfo.dateRange,
-        segments: reportInfo.segments.map(s => s.toLowerCase()).sort()
-    };
+    // Storage'dan mevcut verileri al
+    const storedData = JSON.parse(sessionStorage.getItem('ga4_abtest_data') || '{}');
+    const currentKPIs = tableData.kpis;
 
-    if (storedData) {
-        // Kayıtlı rapor bilgileri
-        const storedReportInfo = {
-            reportName: storedData.reportName,
-            dateRange: storedData.dateRange,
-            segments: storedData.segments.map(s => s.toLowerCase()).sort()
-        };
-
-        // Rapor bilgilerinin eşleşip eşleşmediğini kontrol et
-        const isMatchingReport = JSON.stringify(currentReportInfo) === JSON.stringify(storedReportInfo);
-
-        if (currentKPIs.length === 1) {
-            if (isMatchingReport) {
-                if (currentKPIs[0] !== storedData.kpi) {
-                    // Farklı KPI ve eşleşen rapor - her iki butonu da göster
-                    const analyzeButton = createButton(`${storedData.kpi}'a Göre Analiz Et`, 'analyze');
-                    const saveButton = createButton('Yeni KPI Kaydet', 'save');
-                    buttonContainer.appendChild(analyzeButton);
-                    buttonContainer.appendChild(saveButton);
-                } else {
-                    // Aynı KPI - sadece kaydet butonu
-                    const saveButton = createButton('KPI Kaydet', 'save');
-                    buttonContainer.appendChild(saveButton);
-                }
-            } else {
-                // Rapor eşleşmiyor - sadece kaydet butonu
-                const saveButton = createButton('KPI Kaydet', 'save');
-                buttonContainer.appendChild(saveButton);
-            }
-        } else {
-            // Birden fazla KPI - analiz butonu
-            const analyzeButton = createButton('AB Test Analiz Et', 'analyze');
-            buttonContainer.appendChild(analyzeButton);
+    if (currentKPIs.length === 2) {
+        // İki KPI varsa doğrudan analiz butonu
+        const analyzeButton = createButton('AB Test Analiz Et', 'analyze-direct');
+        buttonContainer.appendChild(analyzeButton);
+    } else if (currentKPIs.length === 1) {
+        // Session Al butonu
+        const sessionButton = createButton('Session Al', 'session');
+        if (storedData.sessionData) {
+            const sessionLabel = document.createElement('div');
+            sessionLabel.className = 'button-label';
+            sessionLabel.textContent = storedData.sessionData.tabName;
+            sessionButton.appendChild(sessionLabel);
         }
-    } else {
-        // Hiç kayıtlı veri yok
-        if (currentKPIs.length === 1) {
-            const saveButton = createButton('KPI Kaydet', 'save');
-            buttonContainer.appendChild(saveButton);
-        } else {
-            const analyzeButton = createButton('AB Test Analiz Et', 'analyze');
-            buttonContainer.appendChild(analyzeButton);
+
+        // Dönüşüm Al butonu
+        const conversionButton = createButton('Dönüşüm Al', 'conversion');
+        if (storedData.conversionData) {
+            const conversionLabel = document.createElement('div');
+            conversionLabel.className = 'button-label';
+            conversionLabel.textContent = storedData.conversionData.tabName;
+            conversionButton.appendChild(conversionLabel);
         }
+
+        // Analiz Et butonu
+        const analyzeButton = createButton('AB Test Analiz Et', 'analyze');
+        analyzeButton.disabled = !(storedData.sessionData && storedData.conversionData);
+        if (analyzeButton.disabled) {
+            analyzeButton.classList.add('disabled');
+        }
+
+        buttonContainer.appendChild(sessionButton);
+        buttonContainer.appendChild(conversionButton);
+        buttonContainer.appendChild(analyzeButton);
     }
+
+    // Buton stilleri için CSS ekle
+    const style = document.createElement('style');
+    style.textContent = `
+        .ga4-abtest-buttons {
+            display: inline-flex;
+            gap: 12px;
+            margin-left: 16px;
+            align-items: center;
+        }
+        .ga4-abtest-button {
+            position: relative;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-width: 120px;
+        }
+        .ga4-abtest-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(rgba(255,255,255,0.1), rgba(255,255,255,0));
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .ga4-abtest-button:hover::before {
+            opacity: 1;
+        }
+        .ga4-abtest-button:active {
+            transform: translateY(1px);
+        }
+        .ga4-abtest-button.session {
+            background: linear-gradient(135deg, #4285f4, #2b6cd4);
+        }
+        .ga4-abtest-button.conversion {
+            background: linear-gradient(135deg, #34a853, #2d8f47);
+        }
+        .ga4-abtest-button.analyze,
+        .ga4-abtest-button.analyze-direct {
+            background: linear-gradient(135deg, #ea4335, #d62516);
+        }
+        .ga4-abtest-button.disabled {
+            background: linear-gradient(135deg, #9aa0a6, #80868b);
+            cursor: not-allowed;
+            opacity: 0.8;
+        }
+        .button-label {
+            font-size: 11px;
+            margin-top: 6px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+            text-align: center;
+            font-weight: 500;
+            color: rgba(255,255,255,0.9);
+            letter-spacing: 0.2px;
+        }
+        #ga4-abtest-results {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            width: 700px;
+            max-width: 90vw;
+            max-height: 90vh;
+            overflow-y: auto;
+            z-index: 10000;
+            display: none;
+            padding: 32px;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translate(-50%, -48%);
+            }
+            to {
+                opacity: 1;
+                transform: translate(-50%, -50%);
+            }
+        }
+        #ga4-abtest-results .card {
+            background: #ffffff;
+            border: 1px solid #e8eaed;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+        }
+        #ga4-abtest-results .card:hover {
+            box-shadow: 0 6px 12px rgba(0,0,0,0.05);
+            transform: translateY(-1px);
+        }
+        #ga4-abtest-results .card-title {
+            color: #202124;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            letter-spacing: 0.3px;
+        }
+        #ga4-abtest-results .test-info {
+            font-size: 14px;
+            line-height: 1.6;
+            color: #5f6368;
+            margin-bottom: 12px;
+        }
+        #ga4-abtest-results .test-info strong {
+            color: #202124;
+            font-weight: 600;
+        }
+        #ga4-abtest-results .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 24px 0;
+        }
+        #ga4-abtest-results .metric-card {
+            background: #f8f9fa;
+            border: 1px solid #e8eaed;
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+        #ga4-abtest-results .metric-card:hover {
+            background: #ffffff;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.05);
+            transform: translateY(-2px);
+        }
+        #ga4-abtest-results .metric-title {
+            font-size: 13px;
+            color: #5f6368;
+            margin-bottom: 8px;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+        }
+        #ga4-abtest-results .metric-value {
+            font-size: 32px;
+            font-weight: 600;
+            color: #202124;
+            margin-bottom: 16px;
+            letter-spacing: -0.5px;
+        }
+        #ga4-abtest-results .metric-change {
+            font-size: 16px;
+            font-weight: 600;
+            margin: 24px 0;
+            text-align: center;
+            padding: 16px;
+            border-radius: 12px;
+            background: #f8f9fa;
+            transition: all 0.3s ease;
+        }
+        #ga4-abtest-results .metric-change.positive {
+            color: #34a853;
+            background: rgba(52,168,83,0.1);
+        }
+        #ga4-abtest-results .metric-change.negative {
+            color: #ea4335;
+            background: rgba(234,67,53,0.1);
+        }
+        #ga4-abtest-results .confidence {
+            font-size: 14px;
+            color: #5f6368;
+            margin-top: 16px;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            text-align: center;
+            font-weight: 500;
+            letter-spacing: 0.2px;
+            border: 1px solid #e8eaed;
+        }
+        #ga4-abtest-results .close-button {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: #f8f9fa;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #5f6368;
+            padding: 8px 12px;
+            line-height: 1;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        #ga4-abtest-results .close-button:hover {
+            background: #e8eaed;
+            color: #202124;
+        }
+        #ga4-abtest-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(32,33,36,0.6);
+            backdrop-filter: blur(4px);
+            z-index: 9999;
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .ga4-notification {
+            position: fixed;
+            top: 116px;
+            right: 16px;
+            padding: 16px 24px;
+            border-radius: 12px;
+            background: #ffffff;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            font-size: 14px;
+            line-height: 1.5;
+            z-index: 10001;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: translateX(150%);
+            font-weight: 500;
+            letter-spacing: 0.2px;
+            min-width: 300px;
+        }
+        .ga4-notification.show {
+            transform: translateX(0);
+        }
+        .ga4-notification.success {
+            border-left: 4px solid #34a853;
+            color: #0d652d;
+            background: #e6f4ea;
+        }
+        .ga4-notification.error {
+            border-left: 4px solid #ea4335;
+            color: #b31412;
+            background: #fce8e6;
+        }
+        .ga4-notification.info {
+            border-left: 4px solid #4285f4;
+            color: #174ea6;
+            background: #e8f0fe;
+        }
+    `;
+    document.head.appendChild(style);
 }
 
 // Buton oluştur
@@ -243,44 +577,74 @@ function createButton(text, mode) {
     return button;
 }
 
-// KPI verilerini kaydet
-function saveKPIData(reportInfo, tableData) {
-    try {
-        const dataToStore = {
-            reportName: reportInfo.reportName,
-            dateRange: reportInfo.dateRange,
-            segments: reportInfo.segments,
-            kpi: tableData.kpis[0],
-            data: tableData
-        };
-        sessionStorage.setItem('ga4_abtest_data', JSON.stringify(dataToStore));
-        showNotification('KPI verisi kaydedildi. Diğer KPI ile karşılaştırma yapmak için yeni bir KPI seçin.', 'success');
-    } catch (error) {
-        console.error('KPI kaydetme hatası:', error);
-        showNotification('KPI verisi kaydedilirken bir hata oluştu: ' + error.message, 'error');
+// Analiz için verileri hazırla
+function prepareAnalysisData(storedData) {
+    if (!storedData.sessionData || !storedData.conversionData) {
+        throw new Error('Session ve dönüşüm verileri eksik');
     }
-}
-
-// Analiz için verileri birleştir
-function combineKPIData(currentData, storedData) {
-    // Segment sıralamasını kontrol et ve eşleştir
-    const combinedSegments = currentData.segments.map(segment => {
-        const storedSegment = storedData.data.segments.find(s => 
-            s.segment.toLowerCase() === segment.segment.toLowerCase()
-        );
-
-        return {
-            segment: segment.segment,
-            metrics: {
-                ...storedSegment.metrics,
-                ...segment.metrics
-            }
-        };
-    });
 
     return {
-        kpis: [storedData.kpi, ...currentData.kpis],
-        segments: combinedSegments
+        kpis: ['Sessions', 'Conversions'],
+        segments: [
+            {
+                segment: storedData.sessionData.segment,
+                metrics: {
+                    'Sessions': storedData.sessionData.value,
+                    'Conversions': storedData.conversionData.value
+                }
+            },
+            {
+                segment: storedData.sessionData.variantSegment,
+                metrics: {
+                    'Sessions': storedData.sessionData.variantValue,
+                    'Conversions': storedData.conversionData.variantValue
+                }
+            }
+        ],
+        sessionTab: storedData.sessionData.tabName,
+        conversionTab: storedData.conversionData.tabName
+    };
+}
+
+// İki KPI'lı tablo için analiz verilerini hazırla
+function prepareDirectAnalysisData(tableData) {
+    const kpis = tableData.kpis;
+    if (kpis.length !== 2) {
+        throw new Error('Doğrudan analiz için tabloda tam olarak 2 KPI olmalıdır');
+    }
+
+    // Kontrol ve varyant gruplarını bul
+    const control = tableData.segments.find(segment => 
+        segment.segment.toLowerCase().includes('v0') || 
+        segment.segment.toLowerCase().includes('control')
+    );
+    const variant = tableData.segments.find(segment => 
+        !(segment.segment.toLowerCase().includes('v0') || 
+          segment.segment.toLowerCase().includes('control'))
+    );
+
+    if (!control || !variant) {
+        throw new Error('Kontrol veya varyant grubu bulunamadı');
+    }
+
+    return {
+        kpis: ['Sessions', 'Conversions'],
+        segments: [
+            {
+                segment: control.segment,
+                metrics: {
+                    'Sessions': control.metrics[kpis[0]],
+                    'Conversions': control.metrics[kpis[1]]
+                }
+            },
+            {
+                segment: variant.segment,
+                metrics: {
+                    'Sessions': variant.metrics[kpis[0]],
+                    'Conversions': variant.metrics[kpis[1]]
+                }
+            }
+        ]
     };
 }
 
@@ -306,123 +670,207 @@ function injectAnalyzeButton() {
     style.textContent = `
         .ga4-abtest-buttons {
             display: inline-flex;
-            gap: 8px;
+            gap: 12px;
             margin-left: 16px;
+            align-items: center;
         }
         .ga4-abtest-button {
-            background-color: #4285f4;
+            position: relative;
             color: white;
             border: none;
-            border-radius: 4px;
-            padding: 8px 16px;
+            border-radius: 8px;
+            padding: 10px 20px;
             font-size: 14px;
+            font-weight: 600;
             cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-width: 120px;
+        }
+        .ga4-abtest-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(rgba(255,255,255,0.1), rgba(255,255,255,0));
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .ga4-abtest-button:hover::before {
+            opacity: 1;
+        }
+        .ga4-abtest-button:active {
+            transform: translateY(1px);
+        }
+        .ga4-abtest-button.session {
+            background: linear-gradient(135deg, #4285f4, #2b6cd4);
+        }
+        .ga4-abtest-button.conversion {
+            background: linear-gradient(135deg, #34a853, #2d8f47);
+        }
+        .ga4-abtest-button.analyze,
+        .ga4-abtest-button.analyze-direct {
+            background: linear-gradient(135deg, #ea4335, #d62516);
+        }
+        .ga4-abtest-button.disabled {
+            background: linear-gradient(135deg, #9aa0a6, #80868b);
+            cursor: not-allowed;
+            opacity: 0.8;
+        }
+        .button-label {
+            font-size: 11px;
+            margin-top: 6px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+            text-align: center;
             font-weight: 500;
-        }
-        .ga4-abtest-button:hover {
-            background-color: #3367d6;
-        }
-        .ga4-abtest-button.save {
-            background-color: #34a853;
-        }
-        .ga4-abtest-button.save:hover {
-            background-color: #2d8f47;
+            color: rgba(255,255,255,0.9);
+            letter-spacing: 0.2px;
         }
         #ga4-abtest-results {
             position: fixed;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
-            width: 600px;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            width: 700px;
             max-width: 90vw;
             max-height: 90vh;
             overflow-y: auto;
             z-index: 10000;
             display: none;
-            padding: 20px;
+            padding: 32px;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translate(-50%, -48%);
+            }
+            to {
+                opacity: 1;
+                transform: translate(-50%, -50%);
+            }
         }
         #ga4-abtest-results .card {
-            background: #f8f9fa;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 16px;
+            background: #ffffff;
+            border: 1px solid #e8eaed;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+        }
+        #ga4-abtest-results .card:hover {
+            box-shadow: 0 6px 12px rgba(0,0,0,0.05);
+            transform: translateY(-1px);
         }
         #ga4-abtest-results .card-title {
-            color: #1a73e8;
-            font-size: 14px;
-            font-weight: 500;
-            margin-bottom: 8px;
+            color: #202124;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            letter-spacing: 0.3px;
         }
         #ga4-abtest-results .test-info {
-            font-size: 13px;
-            line-height: 1.5;
-            margin-bottom: 8px;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #5f6368;
+            margin-bottom: 12px;
+        }
+        #ga4-abtest-results .test-info strong {
+            color: #202124;
+            font-weight: 600;
         }
         #ga4-abtest-results .metrics-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-top: 12px;
+            gap: 20px;
+            margin: 24px 0;
         }
         #ga4-abtest-results .metric-card {
-            background: white;
-            border: 1px solid #e0e0e0;
-            border-radius: 4px;
-            padding: 12px;
+            background: #f8f9fa;
+            border: 1px solid #e8eaed;
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+        #ga4-abtest-results .metric-card:hover {
+            background: #ffffff;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.05);
+            transform: translateY(-2px);
         }
         #ga4-abtest-results .metric-title {
-            font-size: 12px;
-            color: #5f6368;
-            margin-bottom: 4px;
-        }
-        #ga4-abtest-results .metric-value {
-            font-size: 24px;
-            font-weight: 500;
-            color: #1a73e8;
-            margin-bottom: 8px;
-        }
-        #ga4-abtest-results .metric-change {
-            font-size: 14px;
-            font-weight: 500;
-            margin-top: 12px;
-            text-align: center;
-            padding: 8px;
-            border-radius: 4px;
-            background: #f8f9fa;
-        }
-        #ga4-abtest-results .positive {
-            color: #34a853;
-        }
-        #ga4-abtest-results .negative {
-            color: #ea4335;
-        }
-        #ga4-abtest-results .confidence {
             font-size: 13px;
             color: #5f6368;
-            margin-top: 12px;
-            padding: 8px;
-            background: #f1f3f4;
-            border-radius: 4px;
+            margin-bottom: 8px;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+        }
+        #ga4-abtest-results .metric-value {
+            font-size: 32px;
+            font-weight: 600;
+            color: #202124;
+            margin-bottom: 16px;
+            letter-spacing: -0.5px;
+        }
+        #ga4-abtest-results .metric-change {
+            font-size: 16px;
+            font-weight: 600;
+            margin: 24px 0;
             text-align: center;
+            padding: 16px;
+            border-radius: 12px;
+            background: #f8f9fa;
+            transition: all 0.3s ease;
+        }
+        #ga4-abtest-results .metric-change.positive {
+            color: #34a853;
+            background: rgba(52,168,83,0.1);
+        }
+        #ga4-abtest-results .metric-change.negative {
+            color: #ea4335;
+            background: rgba(234,67,53,0.1);
+        }
+        #ga4-abtest-results .confidence {
+            font-size: 14px;
+            color: #5f6368;
+            margin-top: 16px;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            text-align: center;
+            font-weight: 500;
+            letter-spacing: 0.2px;
+            border: 1px solid #e8eaed;
         }
         #ga4-abtest-results .close-button {
             position: absolute;
-            top: 12px;
-            right: 12px;
-            background: none;
+            top: 16px;
+            right: 16px;
+            background: #f8f9fa;
             border: none;
-            font-size: 24px;
+            font-size: 20px;
             cursor: pointer;
             color: #5f6368;
-            padding: 4px 8px;
+            padding: 8px 12px;
             line-height: 1;
+            border-radius: 8px;
+            transition: all 0.3s ease;
         }
         #ga4-abtest-results .close-button:hover {
-            color: #1a73e8;
+            background: #e8eaed;
+            color: #202124;
         }
         #ga4-abtest-overlay {
             position: fixed;
@@ -430,38 +878,50 @@ function injectAnalyzeButton() {
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
+            background: rgba(32,33,36,0.6);
+            backdrop-filter: blur(4px);
             z-index: 9999;
             display: none;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
         .ga4-notification {
             position: fixed;
-            top: 16px;
+            top: 116px;
             right: 16px;
-            padding: 12px 24px;
-            border-radius: 8px;
-            background: white;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
+            padding: 16px 24px;
+            border-radius: 12px;
+            background: #ffffff;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             font-size: 14px;
             line-height: 1.5;
             z-index: 10001;
-            transition: all 0.3s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             transform: translateX(150%);
+            font-weight: 500;
+            letter-spacing: 0.2px;
+            min-width: 300px;
         }
         .ga4-notification.show {
             transform: translateX(0);
         }
         .ga4-notification.success {
             border-left: 4px solid #34a853;
-            color: #1e8e3e;
+            color: #0d652d;
+            background: #e6f4ea;
         }
         .ga4-notification.error {
             border-left: 4px solid #ea4335;
-            color: #d93025;
+            color: #b31412;
+            background: #fce8e6;
         }
         .ga4-notification.info {
             border-left: 4px solid #4285f4;
-            color: #1a73e8;
+            color: #174ea6;
+            background: #e8f0fe;
         }
     `;
     document.head.appendChild(style);
@@ -551,34 +1011,56 @@ function injectAnalyzeButton() {
                 return;
             }
 
-            if (button.dataset.mode === 'save') {
-                // KPI verilerini kaydet
-                saveKPIData(results.data, results.data.tableData);
-                return;
+            // Buton tipine göre işlem yap
+            switch (button.dataset.mode) {
+                case 'session':
+                    saveKPIData(results.data, results.data.tableData, 'session');
+                    break;
+                case 'conversion':
+                    saveKPIData(results.data, results.data.tableData, 'conversion');
+                    break;
+                case 'analyze':
+                    if (button.disabled) {
+                        showNotification('Analiz için hem session hem de dönüşüm verisi gerekli', 'error');
+                        return;
+                    }
+
+                    const storedData = JSON.parse(sessionStorage.getItem('ga4_abtest_data') || '{}');
+                    const analysisData = prepareAnalysisData(storedData);
+                    const analysis = analyzeABTest(analysisData);
+                    displayResults(
+                        document.getElementById('ga4-abtest-content'),
+                        {
+                            reportName: results.data.reportName,
+                            dateRange: results.data.dateRange,
+                            analysis
+                        }
+                    );
+                    break;
+                case 'analyze-direct':
+                    const directAnalysisData = prepareDirectAnalysisData(results.data.tableData);
+                    const directAnalysis = analyzeABTest(directAnalysisData);
+                    displayDirectResults(
+                        document.getElementById('ga4-abtest-content'),
+                        {
+                            reportName: results.data.reportName,
+                            dateRange: results.data.dateRange,
+                            analysis: directAnalysis,
+                            kpis: results.data.tableData.kpis
+                        }
+                    );
+                    break;
             }
 
-            // Analiz yap
-            let analysisData = results.data.tableData;
-            const storedData = JSON.parse(sessionStorage.getItem('ga4_abtest_data') || 'null');
-
-            if (storedData && results.data.tableData.kpis.length === 1) {
-                // Kayıtlı veriyle birleştir
-                analysisData = combineKPIData(results.data.tableData, storedData);
+            // Popup'ı göster (analiz durumlarında)
+            if (button.dataset.mode === 'analyze' || button.dataset.mode === 'analyze-direct') {
+                document.getElementById('ga4-abtest-overlay').style.display = 'block';
+                document.getElementById('ga4-abtest-results').style.display = 'block';
             }
 
-            const analysis = analyzeABTest(analysisData);
-            displayResults(
-                document.getElementById('ga4-abtest-content'),
-                {
-                    reportName: results.data.reportName,
-                    dateRange: results.data.dateRange,
-                    analysis
-                }
-            );
-            
-            // Popup'ı göster
-            overlay.style.display = 'block';
-            resultsPopup.style.display = 'block';
+            // İşlem sonrası storage durumunu konsola yazdır
+            const storageData = JSON.parse(sessionStorage.getItem('ga4_abtest_data') || '{}');
+            console.log('Buton tıklandı - Storage durumu:', storageData);
         } catch (error) {
             console.error('İşlem hatası:', error);
             showNotification('İşlem sırasında bir hata oluştu: ' + error.message, 'error');
@@ -602,6 +1084,9 @@ function updateButtonState(buttonContainer) {
     const results = getReportInfo();
     if (results.success) {
         checkKPIDataAndUpdateButton(buttonContainer, results.data.tableData, results.data);
+        // Storage durumunu konsola yazdır
+        const storageData = JSON.parse(sessionStorage.getItem('ga4_abtest_data') || '{}');
+  
     }
 }
 
@@ -911,7 +1396,17 @@ function displayResults(resultDiv, data) {
             <div class="test-info">
                 <strong>${reportName}</strong><br>
                 ${dateRange}<br>
-                ${testDuration ? `Test Süresi: ${testDuration} gün` : ''}
+                ${testDuration ? `Test Süresi: ${testDuration} gün` : ''}<br>
+                <div class="metrics-info">
+                    <div class="metric-source">
+                        <span class="metric-label">Session Metriği:</span>
+                        <span class="metric-tab">${analysis.sessionTab || 'Aynı tablo'}</span>
+                    </div>
+                    <div class="metric-source">
+                        <span class="metric-label">Dönüşüm Metriği:</span>
+                        <span class="metric-tab">${analysis.conversionTab || 'Aynı tablo'}</span>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -932,6 +1427,100 @@ function displayResults(resultDiv, data) {
                     <div class="test-info">
                         ${analysis.variant.sessions.toLocaleString()} session<br>
                         ${analysis.variant.conversions.toLocaleString()} conversion
+                    </div>
+                </div>
+            </div>
+            <div class="metric-change ${analysis.improvement >= 0 ? 'positive' : 'negative'}">
+                ${improvementText}
+            </div>
+            <div class="confidence">
+                ${analysis.stats.isSignificant 
+                    ? `✓ ${analysis.stats.probability.toFixed(1)}% olasılıkla varyant daha iyi performans gösteriyor` 
+                    : `⚠️ Varyantın daha iyi olma olasılığı: ${analysis.stats.probability.toFixed(1)}% (95% için yeterli değil)`}
+            </div>
+        </div>
+    `;
+
+    // Yeni stil ekle
+    const style = document.createElement('style');
+    style.textContent = `
+        .metrics-info {
+            margin-top: 12px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e8eaed;
+        }
+        .metric-source {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+        }
+        .metric-source:not(:last-child) {
+            border-bottom: 1px solid #e8eaed;
+            margin-bottom: 4px;
+            padding-bottom: 8px;
+        }
+        .metric-label {
+            color: #5f6368;
+            font-weight: 500;
+        }
+        .metric-tab {
+            color: #1a73e8;
+            font-weight: 500;
+            padding: 4px 8px;
+            background: rgba(26,115,232,0.1);
+            border-radius: 4px;
+            font-size: 13px;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// İki KPI'lı tablo için sonuçları göster
+function displayDirectResults(resultDiv, data) {
+    const { reportName, dateRange, analysis, kpis } = data;
+    const testDuration = calculateTestDuration(dateRange);
+    
+    // Improvement değeri için özel format
+    let improvementText = '';
+    if (isFinite(analysis.improvement)) {
+        improvementText = `${Math.abs(analysis.improvement).toFixed(2)}% ${analysis.improvement >= 0 ? 'artış' : 'düşüş'}`;
+    } else if (analysis.improvement === Infinity) {
+        improvementText = 'Sonsuz artış';
+    } else {
+        improvementText = 'Değişim hesaplanamıyor';
+    }
+    
+    resultDiv.innerHTML = `
+        <div class="card">
+            <div class="card-title">Test Bilgileri</div>
+            <div class="test-info">
+                <strong>${reportName}</strong><br>
+                ${dateRange}<br>
+                ${testDuration ? `Test Süresi: ${testDuration} gün` : ''}<br>
+                Metrikler: ${kpis[0]} → ${kpis[1]} dönüşüm oranı
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Test Sonuçları</div>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-title">Kontrol (${analysis.control.name})</div>
+                    <div class="metric-value">${analysis.control.cr.toFixed(2)}%</div>
+                    <div class="test-info">
+                        ${analysis.control.sessions.toLocaleString()} ${kpis[0]}<br>
+                        ${analysis.control.conversions.toLocaleString()} ${kpis[1]}
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">Varyant (${analysis.variant.name})</div>
+                    <div class="metric-value">${analysis.variant.cr.toFixed(2)}%</div>
+                    <div class="test-info">
+                        ${analysis.variant.sessions.toLocaleString()} ${kpis[0]}<br>
+                        ${analysis.variant.conversions.toLocaleString()} ${kpis[1]}
                     </div>
                 </div>
             </div>
